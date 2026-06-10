@@ -18,7 +18,7 @@ This is a facelift *within* the existing framework — not a rewrite, not a re-p
 
 ## 2. What the product is (design the right story)
 
-**Dynamic Supply Chain — a "Dynamic Digital Product Passport."** A flexible, fully-customisable engine (built on Bitcoin SV) for spinning up a credible supply-chain demo for *practically any* industry. Users compose free-form **stages**, each carrying arbitrary metadata, recorded as an immutable, encrypted on-chain transaction. Each finalized chain is a verifiable **product passport** — an end-to-end record of a product's life, custody, and provenance. It was built to **supersede bespoke, industry-specific supply-chain tools**: one adaptable engine instead of one codebase per vertical.
+**Dynamic Digital Product Passport** — *build any custom supply chain lifecycle.* A flexible, fully-customisable engine (built on Bitcoin SV; also called "Dynamic Supply Chain") for composing a verifiable product passport for *practically any* product journey. Users build free-form **stages**, each carrying arbitrary metadata, recorded as an immutable, encrypted on-chain transaction. Each finalized chain *is* the passport — an end-to-end record of a product's life, custody, and provenance. It was built to **supersede bespoke, industry-specific supply-chain tools**: one adaptable engine instead of one codebase per vertical.
 
 **The design should communicate:** trust, provenance, verifiability, and *flexibility across industries*. Avoid looking like a single-vertical app — it's a passport engine that fits agriculture, manufacturing, aviation, pharma, logistics, anything.
 
@@ -98,7 +98,7 @@ For each surface: **keep** = must still work/render; **goals** = the visual/UX u
 
 ### A. NEW — Landing page  (`/`, per §4)
 A static, presentational page (can be a server component; no wallet required to view). Suggested sections:
-- **Hero:** product name ("Dynamic Digital Product Passport"), one-line value prop, primary CTA → builder, secondary CTA → Examples.
+- **Hero:** product name (**Dynamic Digital Product Passport**) + tagline **"Build any custom supply chain lifecycle."**, primary CTA → builder, secondary CTA → Examples.
 - **What it does** — short, plain-language explanation.
 - **How it works** — 3–4 steps: *Create a chain → Add stages with custom data → Hand off between parties → Finalize the passport*.
 - **Flexibility / use-cases** — surface the three built-in templates (agriculture "Soil to Table", "Plastic Product Lifecycle", "Aircraft Parts Lifecycle") as proof it fits any vertical.

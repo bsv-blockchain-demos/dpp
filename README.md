@@ -1,10 +1,12 @@
-# Dynamic Supply Chain — Dynamic Digital Product Passport
+# Dynamic Digital Product Passport
 
-*(formerly "Supply Chain Action Builder")*
+> **Build any custom supply chain lifecycle.**
 
-A flexible, fully-customisable **Digital Product Passport** engine built on Bitcoin SV (BSV). Instead of hard-coding a single industry's workflow, Dynamic Supply Chain lets you spin up a credible supply-chain demo for *practically any* use case — agriculture, manufacturing, aviation, pharmaceuticals, logistics — by composing free-form **stages**, each carrying arbitrary key/value metadata and recorded as an immutable, encrypted on-chain transaction.
+*(also referred to as "Dynamic Supply Chain"; formerly "Supply Chain Action Builder")*
 
-It was built to **supersede bespoke, industry-specific supply-chain implementations**: rather than maintaining one codebase per vertical, the same engine adapts to any product journey. Each completed chain is effectively a **digital product passport** — a verifiable, end-to-end record of a product's life, custody, and provenance, anchored to the blockchain.
+A flexible, fully-customisable **Digital Product Passport** engine built on Bitcoin SV (BSV). Compose a verifiable lifecycle for *any* product — agriculture, manufacturing, aviation, pharmaceuticals, logistics — from free-form **stages**, each carrying arbitrary key/value metadata and recorded as an immutable, encrypted on-chain transaction. Nothing about the journey is hard-coded; you design the passport to fit the product.
+
+It was built to **supersede bespoke, industry-specific supply-chain implementations**: rather than maintaining one codebase per vertical, the same engine adapts to any product journey. Each completed chain *is* a **digital product passport** — a verifiable, end-to-end record of a product's life, custody, and provenance, anchored to the blockchain.
 
 The flexibility comes from three things:
 - **Free-form stages** — name each step whatever your use case needs (1–8 stages per chain).
