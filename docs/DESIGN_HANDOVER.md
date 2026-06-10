@@ -173,7 +173,7 @@ A static, presentational page (can be a server component; no wallet required to 
 - **In-product guidance per §8** implemented throughout: contextual help on jargon, rich coaching empty states, journey framing in the builder, status explainers, "what just happened" confirmations, a "How it works"/glossary affordance, and inline field microcopy.
 - Design tokens centralised in `globals.css` `@theme`; primitives reused, not re-styled per file.
 - shadcn/ui initialised with its theming wired into `globals.css` tokens; `lucide-react` + `tw-animate-css` installed; emoji indicators retired in favour of lucide.
-- `npm run build` passes, `npm run lint` is clean, and `npm test` stays green (logic untouched, so tests must not change behaviour).
+- `npm run build` passes (it does today — keep it that way). **Baseline note (2026-06-10):** the build is green, but `npm run lint` already reports **22 errors / 17 warnings** and `npm test` already has failures — **all pre-existing, in logic/test files that are off-limits (Appendix C)**: `no-explicit-any`/`prefer-const`/unescaped-entity in `mongo.ts`, `pushdropHelpers.ts`, `overlayFunctions.ts`, `createStageModal.tsx`, `walletContext.tsx`, plus a missing `dotenv` dev-dep that stops the PushDrop test suite from running. So the realistic bar is: **build stays green, and you introduce no *new* lint errors/warnings in the files you touch.** The pre-existing logic/test failures are a separate cleanup, not part of this UI overhaul.
 - Every pre-existing state (loading / empty / error / disabled / success / warning) still renders.
 - Responsive at `sm` / `md` / `lg`.
 - A short **CHANGELOG** of visual changes + any new shared/presentational components created.
