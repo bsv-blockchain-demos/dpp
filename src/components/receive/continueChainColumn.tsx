@@ -1,7 +1,7 @@
 'use client';
 
 import { ActionChainStage } from "../../lib/mongo";
-import { StageItem } from "../renderStages/stageItem";
+import { StageRow } from "../renderStages/stageRow";
 import { CreateStageModal } from "../stageActions/createStageModal";
 import { CHAIN_TEMPLATES, ChainTemplate } from "../stageActions/createModalTemplates";
 import { useWalletContext } from "../../context/walletContext";
@@ -12,6 +12,10 @@ import { useState } from "react";
 import { toast } from "react-hot-toast";
 import { Spinner } from "../ui/spinner";
 import Link from "next/link";
+import { PageHead } from "../common/page-head";
+import { CoachCard } from "../common/coach-card";
+import { InfoTip } from "../common/info-tip";
+import { Icon } from "../common/icon";
 
 interface ReceivedChain {
     transferId: string;
@@ -37,6 +41,7 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
     const [hasAddedStage, setHasAddedStage] = useState(false);
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<ChainTemplate | null>(null);
+    const [lastStageForwarded, setLastStageForwarded] = useState(false);
 
     const { userWallet, userPubKey } = useWalletContext();
 
@@ -194,6 +199,9 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
 
             setStages([...stages, newStage]);
             setHasAddedStage(true);
+            // The stage you just added is forwarded (locked to a receiver) only
+            // when you specified one; otherwise you still hold it yourself.
+            setLastStageForwarded(Boolean(newReceiverPubKey));
         } catch (error) {
             console.error('Error adding stage:', error);
             toast.error('An error occurred while adding the stage');
@@ -257,197 +265,225 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
         }
     };
 
+    const titleMissing = !chain.title || chain.title.trim() === '';
+
     return (
         <>
-            <div className="w-full flex flex-col items-center gap-8 py-8">
-                {/* Back Button */}
-                <div className="w-full max-w-xl">
-                    <button
-                        onClick={onBack}
-                        className="flex items-center gap-2 text-white hover:text-blue-200 transition-colors font-medium"
-                    >
-                        <span>←</span>
-                        <span>Back to Received Chains</span>
-                    </button>
-                </div>
+            <div className="mx-auto max-w-[720px]">
+                <button
+                    type="button"
+                    onClick={onBack}
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginBottom: 16, paddingLeft: 8 }}
+                >
+                    <Icon name="arrow-right" size={15} style={{ transform: "rotate(180deg)" }} />
+                    Back to inbox
+                </button>
 
-                {/* Chain Info */}
-                <div className="w-full max-w-xl bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl p-6 shadow-lg border border-gray-700">
-                    <h2 className="text-2xl font-bold text-white mb-4">
-                        {chain.title || 'Untitled Chain'}
-                    </h2>
-                    <div className="space-y-2 text-sm text-gray-300">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <span className="font-semibold whitespace-nowrap">Chain ID:</span>
-                            <div className="flex-1 flex items-center gap-2 min-w-0">
-                                <Link
-                                    href={`/examples/${chain.actionChainId}`}
-                                    className="truncate font-mono text-xs text-blue-300 hover:text-blue-100 hover:underline cursor-pointer transition-colors"
-                                >
-                                    {chain.actionChainId}
-                                </Link>
-                                <button
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        navigator.clipboard.writeText(chain.actionChainId);
-                                        toast.success('Chain ID copied to clipboard!', { duration: 2000 });
-                                    }}
-                                    className="px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded transition-colors flex items-center gap-1 whitespace-nowrap flex-shrink-0 hover:cursor-pointer"
-                                    title="Copy Chain ID"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                    </svg>
-                                    Copy
-                                </button>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold">Sent by:</span>
-                            <span className="truncate font-mono text-xs">
-                                {chain.senderPubKey.slice(0, 12)}...{chain.senderPubKey.slice(-8)}
-                            </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold">Current Stages:</span>
-                            <span>{stages.length}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold">Received:</span>
-                            <span>{new Date(chain.sentAt).toLocaleString()}</span>
-                        </div>
+                <PageHead
+                    eyebrow="Continuing a chain"
+                    eyebrowIcon="corner-down-right"
+                    title={chain.title || "Untitled chain"}
+                    sub="You hold the latest stage. Add yours to continue the passport, or forward it on by locking the next stage to another wallet."
+                />
+
+                {/* chain info */}
+                <div className="card card-pad" style={{ marginBottom: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                        <span className="label" style={{ fontWeight: 500 }}>
+                            <InfoTip title="Chain ID" body="The unique on-chain ID for this passport. Share it so anyone can look the passport up and verify it.">
+                                Chain ID
+                            </InfoTip>
+                        </span>
+                        <span className="txid" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
+                            <Icon name="link" size={13} style={{ color: "var(--ink-3)" }} />
+                            <Link href={`/examples/${chain.actionChainId}`} className="v" style={{ color: "inherit" }} title={chain.actionChainId}>
+                                {chain.actionChainId}
+                            </Link>
+                            <button
+                                type="button"
+                                className="copybtn"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    navigator.clipboard.writeText(chain.actionChainId);
+                                    toast.success('Chain ID copied to clipboard!', { duration: 2000 });
+                                }}
+                                title="Copy Chain ID"
+                                aria-label="Copy Chain ID"
+                            >
+                                <Icon name="copy" size={13} />
+                            </button>
+                        </span>
                     </div>
+                    <dl className="kv">
+                        <dt>Sent by</dt>
+                        <dd className="mono" style={{ wordBreak: "break-all" }}>
+                            {chain.senderPubKey.slice(0, 12)}…{chain.senderPubKey.slice(-8)}
+                        </dd>
+                        <dt>Current stages</dt>
+                        <dd>{stages.length}</dd>
+                        <dt>Received</dt>
+                        <dd>{new Date(chain.sentAt).toLocaleString()}</dd>
+                    </dl>
                 </div>
 
-                {/* Template Selection - Show before adding stage */}
+                {/* continue vs forward coach (before adding) */}
                 {!hasAddedStage && (
-                    <div className="w-full max-w-xl">
-                        <p className="text-xs font-medium text-blue-200 mb-2">Quick Templates:</p>
-                        <div className="flex gap-2 flex-wrap">
-                            {CHAIN_TEMPLATES.map((template) => (
-                                <button
-                                    key={template.title}
-                                    type="button"
-                                    onClick={() => {
-                                        if (selectedTemplate?.title === template.title) {
-                                            // Deselect if clicking the already selected template
-                                            setSelectedTemplate(null);
-                                        } else {
-                                            // Select the template
-                                            setSelectedTemplate(template);
-                                            toast.success(`${template.title} template selected!`);
-                                        }
-                                    }}
-                                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all hover:cursor-pointer ${selectedTemplate?.title === template.title
-                                        ? 'bg-blue-500 text-white shadow-lg ring-2 ring-blue-300'
-                                        : 'bg-white text-blue-900 hover:bg-blue-50 shadow-md hover:shadow-lg'
-                                        }`}
-                                >
-                                    {template.title}
-                                </button>
-                            ))}
+                    <div style={{ marginBottom: 16 }}>
+                        <CoachCard icon="unlock" tone="ok" title="You can edit this chain">
+                            This stage was locked to your wallet and is now unlocked for you. Add the next stage below. Leave the recipient blank to keep the passport, or set one to forward custody on.
+                        </CoachCard>
+                    </div>
+                )}
+
+                {/* template chips (before adding) */}
+                {!hasAddedStage && (
+                    <div style={{ marginBottom: 18 }}>
+                        <div className="help" style={{ marginBottom: 8 }}>Start your stage from a template:</div>
+                        <div className="chips">
+                            {CHAIN_TEMPLATES.map((template) => {
+                                const isActive = selectedTemplate?.title === template.title;
+                                return (
+                                    <button
+                                        key={template.title}
+                                        type="button"
+                                        className={`chip${isActive ? " is-active" : ""}`}
+                                        onClick={() => {
+                                            if (selectedTemplate?.title === template.title) {
+                                                setSelectedTemplate(null);
+                                            } else {
+                                                setSelectedTemplate(template);
+                                                toast.success(`${template.title} template selected!`);
+                                            }
+                                        }}
+                                    >
+                                        <Icon name="layers" size={13} />
+                                        {template.title}
+                                    </button>
+                                );
+                            })}
                         </div>
                         {selectedTemplate && (
-                            <p className="text-xs text-blue-200 mt-3">
-                                💡 Tip: Template stages will appear with pre-filled metadata fields when creating stages
+                            <p className="help" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                                <Icon name="info" size={13} />
+                                Template stages appear with pre-filled metadata fields when you create a stage.
                             </p>
                         )}
                     </div>
                 )}
 
-                {/* Info message */}
-                {hasAddedStage && stages.length < 2 && (
-                    <div className="w-full max-w-xl bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                        <p className="text-sm text-yellow-700">
-                            <strong>Note:</strong> You need at least 2 stages. Currently: {stages.length}/2
-                        </p>
-                    </div>
-                )}
-
-                {/* Finalize Button - Show after adding stage */}
-                {hasAddedStage && stages.length >= 2 && (
-                    <div className="w-full max-w-xl">
-                        <button
-                            onClick={handleFinalizeChain}
-                            disabled={isFinalizing || !chain.title || chain.title.trim() === ''}
-                            className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:opacity-60 text-white rounded-lg font-bold text-lg transition-colors shadow-lg hover:shadow-xl disabled:cursor-not-allowed hover:cursor-pointer flex items-center justify-center gap-3"
-                        >
-                            {isFinalizing && <Spinner size="sm" />}
-                            {isFinalizing ? 'Finalizing...' : `✓ Finalize Action Chain (${stages.length} stages)`}
-                        </button>
-                        {(!chain.title || chain.title.trim() === '') ? (
-                            <p className="text-xs text-yellow-300 mt-2 text-center font-medium">
-                                ⚠️ Chain needs a title to finalize
-                            </p>
-                        ) : (
-                            <p className="text-xs text-blue-200 mt-2 text-center">
-                                This will complete and submit your action chain to the blockchain
-                            </p>
-                        )}
-                    </div>
-                )}
-
+                {/* success (after adding) */}
                 {hasAddedStage && (
-                    <div className="w-full max-w-xl bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                        <p className="text-sm text-green-700">
-                            <strong>Success!</strong> You've continued this chain. The new stage has been added.
-                        </p>
+                    <div style={{ marginBottom: 16 }}>
+                        <CoachCard icon="check-circle" tone="ok" title="Stage added">
+                            You&apos;ve continued this chain. The new stage has been recorded on-chain.
+                        </CoachCard>
                     </div>
                 )}
 
-                {/* Render existing stages */}
-                {stages.map((stage, index) => (
-                    <StageItem
-                        key={`${stage.TransactionID}-${index}`}
-                        stage={stage}
-                    />
-                ))}
+                {/* needs more (after adding, < 2) */}
+                {hasAddedStage && stages.length < 2 && (
+                    <div style={{ marginBottom: 16 }}>
+                        <CoachCard icon="alert-triangle" tone="warn" title="Add one more stage">
+                            A passport needs at least 2 stages. You have {stages.length}/2.
+                        </CoachCard>
+                    </div>
+                )}
 
-                {/* Add New Stage Card - Only show if not already added */}
-                {!hasAddedStage && (
-                    <div
-                        onClick={() => {
-                            if (!userWallet) {
-                                toast.error('Please connect your wallet first');
-                                return;
-                            }
-                            setIsModalOpen(true);
-                        }}
-                        className={`w-full max-w-xl bg-white rounded-xl border-2 border-dashed min-h-[280px] flex items-center justify-center group shadow-[6px_8px_16px_rgba(0,0,0,0.25)] transition-all ${userWallet
-                            ? 'border-gray-400 hover:border-blue-500 cursor-pointer hover:shadow-[8px_12px_24px_rgba(0,0,0,0.3)]'
-                            : 'border-gray-300 cursor-not-allowed opacity-60'
-                            }`}
-                    >
-                        <div className="text-center">
-                            <div className={`text-6xl transition-colors mb-2 ${userWallet
-                                ? 'text-gray-300 group-hover:text-blue-400'
-                                : 'text-gray-200'
-                                }`}>
-                                +
+                {/* timeline */}
+                <div className="timeline">
+                    {stages.map((stage, index) => (
+                        <StageRow
+                            key={`${stage.TransactionID}-${index}`}
+                            stage={stage}
+                            index={index}
+                            isFirst={index === 0}
+                            lock={index === stages.length - 1 ? (lastStageForwarded ? "sent" : "self") : "sent"}
+                        />
+                    ))}
+
+                    {/* add-stage row (before adding) */}
+                    {!hasAddedStage && (
+                        <div className="tl-row">
+                            <div className="tl-rail">
+                                <div className="tl-line top" />
+                                <div className="tl-dot ghost"><Icon name={userWallet ? "plus" : "lock"} size={14} /></div>
+                                <div className="tl-line faded" style={{ minHeight: 14 }} />
                             </div>
-                            <p className={`transition-colors text-sm font-medium ${userWallet
-                                ? 'text-gray-400 group-hover:text-blue-500'
-                                : 'text-gray-300'
-                                }`}>
-                                Continue Chain - Add Stage
-                            </p>
-                            {!userWallet && (
-                                <p className="text-xs text-red-500 mt-2">
-                                    Wallet required
-                                </p>
+                            <div className="tl-body">
+                                <button
+                                    type="button"
+                                    className="dashed"
+                                    onClick={() => {
+                                        if (!userWallet) {
+                                            toast.error('Please connect your wallet first');
+                                            return;
+                                        }
+                                        setIsModalOpen(true);
+                                    }}
+                                    style={{
+                                        width: "100%",
+                                        padding: "20px 16px",
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        gap: 5,
+                                        cursor: userWallet ? "pointer" : "not-allowed",
+                                        color: "var(--ink-2)",
+                                        opacity: userWallet ? 1 : 0.6,
+                                    }}
+                                >
+                                    <span className="empty-ico" style={{ width: 36, height: 36, marginBottom: 0 }}>
+                                        <Icon name={userWallet ? "plus" : "lock"} size={18} />
+                                    </span>
+                                    <span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--ink)" }}>
+                                        {userWallet ? "Add your stage" : "Connect wallet to add your stage"}
+                                    </span>
+                                    <span className="faint" style={{ fontSize: 11.5 }}>{stages.length} of 8 stages</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* finalize (after adding, >= 2) */}
+                {hasAddedStage && stages.length >= 2 && (
+                    <div className="card card-pad" style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14.5 }}>Ready to seal this passport?</div>
+                            <div className="muted" style={{ fontSize: 12.8, marginTop: 2 }}>
+                                Finalizing makes the chain read-only and permanently verifiable.
+                            </div>
+                            {titleMissing ? (
+                                <div style={{ fontSize: 12, marginTop: 6, color: "var(--warn)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                    <Icon name="alert-triangle" size={13} />
+                                    This chain needs a title to finalize.
+                                </div>
+                            ) : (
+                                <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>
+                                    This completes and submits the passport to the blockchain.
+                                </div>
                             )}
                         </div>
+                        <button
+                            type="button"
+                            onClick={handleFinalizeChain}
+                            disabled={isFinalizing || titleMissing}
+                            className={`btn btn-ok btn-lg${isFinalizing || titleMissing ? " is-disabled" : ""}`}
+                            style={{ flex: "0 0 auto" }}
+                        >
+                            {isFinalizing ? <Spinner size="sm" /> : <Icon name="check-circle" size={17} />}
+                            {isFinalizing ? "Finalizing…" : `Finalize (${stages.length} stages)`}
+                        </button>
                     </div>
                 )}
 
+                {/* view others (after adding) */}
                 {hasAddedStage && (
-                    <div className="w-full max-w-xl text-center">
-                        <button
-                            onClick={onBack}
-                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-                        >
-                            ← View Other Received Chains
+                    <div style={{ marginTop: 16, textAlign: "center" }}>
+                        <button type="button" className="btn btn-outline" onClick={onBack}>
+                            <Icon name="inbox" size={15} />
+                            View other received chains
                         </button>
                     </div>
                 )}

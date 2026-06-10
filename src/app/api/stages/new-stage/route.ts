@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
         const { actionChainCollection } = await connectToMongo();
         const body = await request.json();
 
-        const { userId, stage, isFirst, actionChainId, chainTitle } = body;
+        const { userId, stage, isFirst, actionChainId, chainTitle, chainImageURL } = body;
 
         // Validate required fields
         if (!userId || !stage || typeof isFirst !== 'boolean') {
@@ -44,10 +44,33 @@ export async function POST(request: NextRequest) {
         };
 
         if (isFirst) {
+            // Validate the optional product image URL (set at creation). Only https
+            // URLs are stored, so an arbitrary data:/javascript: value can't be
+            // persisted and later rendered as an <img>.
+            let imageURL: string | null = null;
+            if (chainImageURL !== undefined && chainImageURL !== null && chainImageURL !== "") {
+                let valid = false;
+                if (typeof chainImageURL === "string" && chainImageURL.length <= 2048) {
+                    try {
+                        valid = new URL(chainImageURL).protocol === "https:";
+                    } catch {
+                        valid = false;
+                    }
+                }
+                if (!valid) {
+                    return NextResponse.json(
+                        { error: "Invalid image URL: must be an https URL" },
+                        { status: 400 }
+                    );
+                }
+                imageURL = chainImageURL;
+            }
+
             // Create new ActionChain with the first stage
             const newActionChain = {
                 userId,
                 title: chainTitle || null,
+                imageURL,
                 stages: [normalizedStage],
                 createdAt: new Date(),
                 updatedAt: new Date(),

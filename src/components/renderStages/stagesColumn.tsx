@@ -1,17 +1,22 @@
 'use client';
 
 import { ActionChainStage } from "../../lib/mongo";
-import { StageItem } from "./stageItem";
+import { StageRow } from "./stageRow";
 import { CreateStageModal } from "../stageActions/createStageModal";
 import { CHAIN_TEMPLATES, ChainTemplate } from "../stageActions/createModalTemplates";
 import { useWalletContext } from "../../context/walletContext";
-import { Transaction, WalletClient } from "@bsv/sdk";
+import { Transaction, WalletClient, Utils, Hash, SymmetricKey } from "@bsv/sdk";
 import { createPushdrop, unlockPushdrop } from "../../utils/pushdropHelpers";
 import { broadcastTransaction, getTransactionByTxid } from "../../utils/overlayFunctions";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "react-hot-toast";
 import { Spinner } from "../ui/spinner";
 import Link from "next/link";
+import { PageHead } from "../common/page-head";
+import { Stepper } from "../common/stepper";
+import { CoachCard } from "../common/coach-card";
+import { InfoTip } from "../common/info-tip";
+import { Icon, type IconName } from "../common/icon";
 
 const MAX_STAGES = 8;
 const MIN_STAGES = 2;
@@ -25,8 +30,33 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [isBroadcasting, setIsBroadcasting] = useState(false);
+    const [carryFields, setCarryFields] = useState<{ key: string; lastValue: string }[]>([]);
+    const [productImageURL, setProductImageURL] = useState("");
+    const [isUploadingProduct, setIsUploadingProduct] = useState(false);
+    const [productUploadError, setProductUploadError] = useState<string | null>(null);
+    const productFileRef = useRef<HTMLInputElement>(null);
 
-    const { userWallet, userPubKey } = useWalletContext();
+    const { userWallet, userPubKey, initializeWallet, isConnecting } = useWalletContext();
+
+    const handleProductFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setProductUploadError(null);
+        setIsUploadingProduct(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const res = await fetch("/api/upload", { method: "POST", body: fd });
+            const uploaded = await res.json();
+            if (!res.ok) throw new Error(uploaded.error || "Upload failed");
+            setProductImageURL(uploaded.url);
+        } catch (err) {
+            setProductUploadError(err instanceof Error ? err.message : "Upload failed");
+        } finally {
+            setIsUploadingProduct(false);
+            if (productFileRef.current) productFileRef.current.value = "";
+        }
+    };
 
     // Fetch current ActionChain on mount
     useEffect(() => {
@@ -44,6 +74,19 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
                     setActionChainId(data.actionChain._id);
                     setStages(data.actionChain.stages);
                     setChainTitle(data.actionChain.title || '');
+                    setProductImageURL(data.actionChain.imageURL || '');
+
+                    // Recover the canonical custom fields from the latest stage's
+                    // on-chain data so carry-forward survives reloads / new sessions.
+                    const loadedStages = data.actionChain.stages;
+                    const latest = loadedStages?.[loadedStages.length - 1];
+                    if (latest?.TransactionID) {
+                        recoverCanonicalFields(latest.TransactionID).then((recovered) => {
+                            if (recovered.length > 0) {
+                                setCarryFields((prev) => (prev.length > 0 ? prev : recovered));
+                            }
+                        });
+                    }
                 }
             } catch (error) {
                 console.error('Error fetching current chain:', error);
@@ -107,6 +150,7 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
                     isFirst,
                     actionChainId: actionChainId,
                     chainTitle: isFirst ? chainTitle : undefined,
+                    chainImageURL: isFirst ? (productImageURL || undefined) : undefined,
                 }),
             });
 
@@ -172,6 +216,8 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
                 setActionChainId(null);
                 setChainTitle('');
                 setSelectedTemplate(null);
+                setCarryFields([]);
+                setProductImageURL("");
                 return; // Don't continue with the rest of the logic
             }
 
@@ -198,6 +244,17 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
 
             // Add new stage to the BOTTOM of the array (append)
             setStages([...stages, newStage]);
+
+            // Remember the custom fields so later stages start with the same canonical set.
+            const reserved = new Set(['title', 'imageURL', 'receiverPubKey']);
+            const customEntries = Object.entries(data).filter(([k, v]) => !reserved.has(k) && k.trim() && v);
+            if (customEntries.length > 0) {
+                setCarryFields((prev) => {
+                    const map = new Map(prev.map((f) => [f.key, f.lastValue]));
+                    for (const [k, v] of customEntries) map.set(k, v);
+                    return Array.from(map, ([key, lastValue]) => ({ key, lastValue }));
+                });
+            }
         } catch (error) {
             console.error('Error saving stage:', error);
             toast.error('An error occurred while saving the stage');
@@ -254,6 +311,8 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
             setActionChainId(null);
             setChainTitle('');
             setSelectedTemplate(null);
+            setCarryFields([]);
+            setProductImageURL("");
         } catch (error) {
             console.error('Error finalizing chain:', error);
             toast.error('Failed to finalize the action chain');
@@ -262,193 +321,342 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
         }
     };
 
-    const isMaxReached = stages.length >= MAX_STAGES;
+    const connected = !!userWallet;
     const needsMoreStages = stages.length < MIN_STAGES;
+    const titleMissing = !chainTitle || chainTitle.trim() === '';
+    const stepperCurrent = !connected ? 0 : stages.length >= MIN_STAGES && actionChainId ? 3 : 1;
 
     // Show loading spinner while fetching current chain
     if (isLoading) {
         return (
-            <div className="w-full flex flex-col items-center gap-4 py-8">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "64px 0" }}>
                 <Spinner size="lg" />
-                <p className="text-white">Loading your action chain...</p>
+                <p className="muted">Loading your Digital Product Passport…</p>
             </div>
         );
     }
 
     return (
         <>
-            <div className="w-full flex flex-col items-center gap-8 py-8">
-                {/* Chain Title Input */}
-                <div className="w-full max-w-xl">
-                    <label htmlFor="chainTitle" className="block text-sm font-medium text-white mb-2">
-                        Action Chain Title
-                    </label>
-                    <input
-                        id="chainTitle"
-                        type="text"
-                        value={chainTitle}
-                        onChange={(e) => setChainTitle(e.target.value)}
-                        placeholder="Choose a template or enter your own title"
-                        className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition text-black font-medium bg-white shadow-lg"
-                    />
+            <PageHead
+                eyebrow="New Digital Product Passport"
+                eyebrowIcon="plus"
+                title="Create a Digital Product Passport"
+                sub="A Digital Product Passport records a product's journey, one lifecycle stage at a time. Add at least two stages to tell its story, then finalize to make it a permanent, verifiable record."
+            />
 
-                    {/* Chain ID Display */}
-                    {actionChainId && (
-                        <div className="mt-3 p-3 bg-blue-900/50 rounded-lg border border-blue-700 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                            <div className="flex-1 min-w-0">
-                                <span className="text-blue-100 text-xs font-semibold mr-2">Chain ID:</span>
-                                <Link
-                                    href={`/examples/${actionChainId}`}
-                                    className="font-mono text-blue-300 text-xs break-all hover:text-blue-100 hover:underline cursor-pointer transition-colors"
+            <Stepper current={stepperCurrent} />
+
+            {!connected && (
+                <div className="gate" style={{ marginBottom: 22 }}>
+                    <Icon name="key-round" size={20} style={{ color: "var(--warn)" }} />
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>Connect your wallet to add stages</div>
+                        <div className="muted" style={{ fontSize: 12.8, marginTop: 1 }}>
+                            Recording a stage on-chain needs a connected wallet to sign it. You can still draft the title and pick a template.
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ flex: "0 0 auto" }}
+                        onClick={() => initializeWallet()}
+                        disabled={isConnecting}
+                    >
+                        {isConnecting ? <Spinner size="sm" /> : <Icon name="key-round" size={14} />}
+                        {isConnecting ? "Connecting…" : "Connect wallet"}
+                    </button>
+                </div>
+            )}
+
+            {/* Guidance: two-up above the form */}
+            <div className="grid gap-4 sm:grid-cols-2" style={{ marginBottom: 22 }}>
+                {!connected ? (
+                    <CoachCard icon="key-round" tone="warn" title="Draft mode">
+                        You can name the product and pick a template now. Connect a wallet when you&apos;re ready to record the first stage on-chain.
+                    </CoachCard>
+                ) : stages.length > 0 ? (
+                    <CoachCard icon="check-circle" tone="ok" title="Stage recorded on-chain">
+                        Your last stage was written to the blockchain. The previous stage&apos;s token was spent to create it, chaining them together.
+                    </CoachCard>
+                ) : (
+                    <CoachCard icon="layers" title="Start your Digital Product Passport">
+                        Add your first stage to begin. Each stage is recorded on-chain as part of this Digital Product Passport&apos;s history.
+                    </CoachCard>
+                )}
+
+                <div className="card card-pad" style={{ padding: 16 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 8, display: "flex", alignItems: "center", gap: 7 }}>
+                        <Icon name="circle-help" size={16} style={{ color: "var(--accent)" }} />
+                        Good to know
+                    </div>
+                    <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 11 }}>
+                        {([
+                            ["layers", `A Digital Product Passport needs at least ${MIN_STAGES} stages and holds up to ${MAX_STAGES}.`],
+                            ["key-round", "To hand off, add a receiver's wallet ID when creating a stage so only they can continue it."],
+                            ["lock", "Leave the receiver blank to keep the stage for yourself."],
+                        ] as [IconName, string][]).map(([ic, t]) => (
+                            <li key={t} style={{ display: "flex", gap: 9 }}>
+                                <Icon name={ic} size={15} style={{ color: "var(--ink-3)", marginTop: 1 }} />
+                                <span className="muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{t}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+
+            {/* Builder */}
+            <div>
+                    {/* title + templates + passport id */}
+                    <div className="card card-pad" style={{ marginBottom: 22 }}>
+                        <div className="field">
+                            <label className="label" htmlFor="chainTitle">Product or batch name</label>
+                            <input
+                                id="chainTitle"
+                                type="text"
+                                className="input"
+                                value={chainTitle}
+                                onChange={(e) => setChainTitle(e.target.value)}
+                                placeholder="Choose a template or enter your own title"
+                            />
+                            <span className="help">This becomes the title of your Digital Product Passport.</span>
+                        </div>
+
+                        {/* Product image (primary) */}
+                        <div className="field" style={{ marginTop: 16 }}>
+                            <label className="label">Product image <span className="opt">· optional</span></label>
+                            <input
+                                ref={productFileRef}
+                                type="file"
+                                accept="image/*,application/pdf"
+                                onChange={handleProductFileSelect}
+                                style={{ display: "none" }}
+                            />
+                            {productImageURL ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 8, border: "1px solid var(--line-2)", borderRadius: "var(--r-sm)", background: "var(--surface-2)" }}>
+                                    <div style={{ width: 56, height: 56, borderRadius: "var(--r-sm)", overflow: "hidden", flex: "0 0 auto", background: "var(--surface-3)", display: "grid", placeItems: "center" }}>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={productImageURL} alt="Product image" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                    </div>
+                                    <span className="mono" style={{ fontSize: 11.5, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{productImageURL}</span>
+                                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => productFileRef.current?.click()} disabled={isUploadingProduct}>Replace</button>
+                                    <button type="button" className="icon-btn" onClick={() => setProductImageURL("")} title="Remove image" aria-label="Remove product image">
+                                        <Icon name="x" size={15} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="dashed"
+                                    onClick={() => productFileRef.current?.click()}
+                                    disabled={isUploadingProduct}
+                                    style={{ width: "100%", padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: isUploadingProduct ? "wait" : "pointer", color: "var(--ink-2)" }}
                                 >
-                                    {actionChainId}
-                                </Link>
+                                    {isUploadingProduct ? (
+                                        <Spinner size="md" />
+                                    ) : (
+                                        <span className="empty-ico" style={{ width: 40, height: 40, marginBottom: 0 }}><Icon name="upload" size={20} /></span>
+                                    )}
+                                    <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{isUploadingProduct ? "Uploading…" : "Upload a product image"}</span>
+                                    <span className="faint" style={{ fontSize: 11.5 }}>Shown on the passport. PNG, JPG, WebP, GIF or PDF, up to 10MB.</span>
+                                </button>
+                            )}
+                            {productUploadError ? (
+                                <span className="help" style={{ color: "var(--danger)", display: "flex", alignItems: "center", gap: 5 }}>
+                                    <Icon name="alert-triangle" size={12} />{productUploadError}
+                                </span>
+                            ) : (
+                                <span className="help">The main image for this Digital Product Passport.</span>
+                            )}
+                        </div>
+
+                        <div style={{ marginTop: 16 }}>
+                            <div className="help" style={{ marginBottom: 8 }}>Or start from a template:</div>
+                            <div className="chips">
+                                {CHAIN_TEMPLATES.map((template) => {
+                                    const isActive = selectedTemplate?.title === template.title;
+                                    return (
+                                        <button
+                                            key={template.title}
+                                            type="button"
+                                            className={`chip${isActive ? " is-active" : ""}`}
+                                            onClick={() => {
+                                                if (selectedTemplate?.title === template.title) {
+                                                    setSelectedTemplate(null);
+                                                } else {
+                                                    setChainTitle(template.title);
+                                                    setSelectedTemplate(template);
+                                                }
+                                            }}
+                                        >
+                                            <Icon name="layers" size={13} />
+                                            {template.title}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {chainTitle && (
+                            <p className="help" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                                <Icon name="info" size={13} />
+                                Template stages appear with pre-filled metadata fields when you create a stage.
+                            </p>
+                        )}
+
+                        {actionChainId && (
+                            <>
+                                <hr className="divider" style={{ margin: "18px 0 14px" }} />
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                                    <span className="label" style={{ fontWeight: 500 }}>
+                                        <InfoTip
+                                            title="Passport ID"
+                                            body="The unique on-chain ID for this Digital Product Passport. Share it so anyone can look it up and verify it."
+                                        >
+                                            Passport ID
+                                        </InfoTip>
+                                    </span>
+                                    <span className="txid" style={{ background: "var(--surface-2)", borderColor: "var(--line)" }}>
+                                        <Icon name="link" size={13} style={{ color: "var(--ink-3)" }} />
+                                        <Link
+                                            href={`/examples/${actionChainId}`}
+                                            className="v"
+                                            style={{ color: "inherit" }}
+                                            title={actionChainId}
+                                        >
+                                            {actionChainId}
+                                        </Link>
+                                        <button
+                                            type="button"
+                                            className="copybtn"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                navigator.clipboard.writeText(actionChainId);
+                                                toast.success('Passport ID copied to clipboard!', { duration: 2000 });
+                                            }}
+                                            title="Copy Passport ID"
+                                            aria-label="Copy Passport ID"
+                                        >
+                                            <Icon name="copy" size={13} />
+                                        </button>
+                                    </span>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* needs more stages */}
+                    {needsMoreStages && stages.length > 0 && (
+                        <div style={{ marginBottom: 22 }}>
+                            <CoachCard icon="alert-triangle" tone="warn" title="Add one more stage">
+                                A Digital Product Passport needs at least {MIN_STAGES} stages. You have {stages.length}/{MIN_STAGES}.
+                            </CoachCard>
+                        </div>
+                    )}
+
+                    {/* timeline */}
+                    <div className="timeline">
+                        {stages.map((stage, index) => (
+                            <StageRow
+                                key={`${stage.TransactionID}-${index}`}
+                                stage={stage}
+                                index={index}
+                                isFirst={index === 0}
+                            />
+                        ))}
+
+                        {/* add stage / max reached */}
+                        {stages.length < MAX_STAGES ? (
+                            <div className="tl-row">
+                                <div className="tl-rail">
+                                    <div className="tl-line top" style={{ background: stages.length === 0 ? "transparent" : undefined }} />
+                                    <div className="tl-dot ghost"><Icon name={connected ? "plus" : "lock"} size={14} /></div>
+                                    <div className="tl-line faded" style={{ minHeight: 14 }} />
+                                </div>
+                                <div className="tl-body">
+                                    <button
+                                        type="button"
+                                        className="dashed"
+                                        onClick={() => {
+                                            if (!userWallet) {
+                                                toast.error('Please connect your wallet first');
+                                                return;
+                                            }
+                                            setIsModalOpen(true);
+                                        }}
+                                        style={{
+                                            width: "100%",
+                                            padding: "22px 16px",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            gap: 6,
+                                            cursor: connected ? "pointer" : "not-allowed",
+                                            color: "var(--ink-2)",
+                                            opacity: connected ? 1 : 0.6,
+                                        }}
+                                    >
+                                        <span className="empty-ico" style={{ width: 38, height: 38, marginBottom: 0 }}>
+                                            <Icon name={connected ? "plus" : "lock"} size={20} />
+                                        </span>
+                                        <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
+                                            {connected ? "Add a stage" : "Connect wallet to add stages"}
+                                        </span>
+                                        <span className="faint" style={{ fontSize: 12 }}>
+                                            {stages.length} of {MAX_STAGES} stages used
+                                        </span>
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="tl-row">
+                                <div className="tl-rail">
+                                    <div className="tl-line top" />
+                                    <div className="tl-dot ghost"><Icon name="check" size={14} /></div>
+                                </div>
+                                <div className="tl-body">
+                                    <div className="dashed" style={{ padding: "22px 16px", textAlign: "center" }}>
+                                        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>Maximum stages reached</div>
+                                        <div className="faint" style={{ fontSize: 12, marginTop: 2 }}>{stages.length} of {MAX_STAGES} stages used</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* finalize */}
+                    {stages.length >= MIN_STAGES && actionChainId && (
+                        <div className="card card-pad" style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: 14.5 }}>Ready to finalize this Digital Product Passport?</div>
+                                <div className="muted" style={{ fontSize: 12.8, marginTop: 2 }}>
+                                    Finalizing makes the DPP read-only and permanently verifiable. You can&apos;t add stages after.
+                                </div>
+                                {titleMissing ? (
+                                    <div style={{ fontSize: 12, marginTop: 6, color: "var(--warn)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                        <Icon name="alert-triangle" size={13} />
+                                        Add a product name above to finalize.
+                                    </div>
+                                ) : (
+                                    <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>
+                                        This completes and submits your Digital Product Passport to the blockchain.
+                                    </div>
+                                )}
                             </div>
                             <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    navigator.clipboard.writeText(actionChainId);
-                                    toast.success('Chain ID copied to clipboard!', { duration: 2000 });
-                                }}
-                                className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded-md transition-colors flex items-center gap-1.5 whitespace-nowrap hover:cursor-pointer"
-                                title="Copy Chain ID"
+                                type="button"
+                                onClick={handleFinalizeChain}
+                                disabled={isFinalizing || titleMissing}
+                                className={`btn btn-ok btn-lg${isFinalizing || titleMissing ? " is-disabled" : ""}`}
+                                style={{ flex: "0 0 auto" }}
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                </svg>
-                                Copy
+                                {isFinalizing ? <Spinner size="sm" /> : <Icon name="check-circle" size={17} />}
+                                {isFinalizing ? "Finalizing…" : `Finalize (${stages.length} stages)`}
                             </button>
                         </div>
                     )}
-
-                    {/* Template Selection Buttons */}
-                    <div className="mt-3">
-                        <p className="text-xs font-medium text-blue-200 mb-2">Quick Templates:</p>
-                        <div className="flex gap-2 flex-wrap">
-                            {CHAIN_TEMPLATES.map((template) => (
-                                <button
-                                    key={template.title}
-                                    type="button"
-                                    onClick={() => {
-                                        if (selectedTemplate?.title === template.title) {
-                                            // Deselect if clicking the already selected template
-                                            setSelectedTemplate(null);
-                                        } else {
-                                            // Select the template and set the title
-                                            setChainTitle(template.title);
-                                            setSelectedTemplate(template);
-                                        }
-                                    }}
-                                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all hover:cursor-pointer ${selectedTemplate?.title === template.title
-                                        ? 'bg-blue-500 text-white shadow-lg ring-2 ring-blue-300'
-                                        : 'bg-white text-blue-900 hover:bg-blue-50 shadow-md hover:shadow-lg'
-                                        }`}
-                                >
-                                    {template.title}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {chainTitle && (
-                        <p className="text-xs text-blue-200 mt-3">
-                            💡 Tip: Template stages will appear with pre-filled metadata fields when creating stages
-                        </p>
-                    )}
                 </div>
 
-                {/* Info message */}
-                {needsMoreStages && stages.length > 0 && (
-                    <div className="w-full max-w-xl bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                        <p className="text-sm text-yellow-700">
-                            <strong>Note:</strong> You need at least {MIN_STAGES} stages. Currently: {stages.length}/{MIN_STAGES}
-                        </p>
-                    </div>
-                )}
-
-                {/* Finalize Button */}
-                {stages.length >= MIN_STAGES && actionChainId && (
-                    <div className="w-full max-w-xl">
-                        <button
-                            onClick={handleFinalizeChain}
-                            disabled={isFinalizing || !chainTitle || chainTitle.trim() === ''}
-                            className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:opacity-60 text-white rounded-lg font-bold text-lg transition-colors shadow-lg hover:shadow-xl disabled:cursor-not-allowed hover:cursor-pointer flex items-center justify-center gap-3"
-                        >
-                            {isFinalizing && <Spinner size="sm" />}
-                            {isFinalizing ? 'Finalizing...' : `✓ Finalize Action Chain (${stages.length} stages)`}
-                        </button>
-                        {(!chainTitle || chainTitle.trim() === '') ? (
-                            <p className="text-xs text-yellow-300 mt-2 text-center font-medium">
-                                ⚠️ Please add an Action Chain Title above to finalize
-                            </p>
-                        ) : (
-                            <p className="text-xs text-blue-200 mt-2 text-center">
-                                This will complete and submit your action chain to the blockchain
-                            </p>
-                        )}
-                    </div>
-                )}
-
-                {/* Render existing stages */}
-                {stages.map((stage, index) => (
-                    <StageItem
-                        key={`${stage.TransactionID}-${index}`}
-                        stage={stage}
-                    />
-                ))}
-
-                {/* Add New Stage Card */}
-                {stages.length < MAX_STAGES ? (
-                    <div
-                        onClick={() => {
-                            if (!userWallet) {
-                                toast.error('Please connect your wallet first');
-                                return;
-                            }
-                            setIsModalOpen(true);
-                        }}
-                        className={`w-full max-w-xl bg-white rounded-xl border-2 border-dashed min-h-[280px] flex items-center justify-center group shadow-[6px_8px_16px_rgba(0,0,0,0.25)] transition-all ${userWallet
-                                ? 'border-gray-400 hover:border-blue-500 cursor-pointer hover:shadow-[8px_12px_24px_rgba(0,0,0,0.3)]'
-                                : 'border-gray-300 cursor-not-allowed opacity-60'
-                            }`}
-                    >
-                        <div className="text-center">
-                            <div className={`text-6xl transition-colors mb-2 ${userWallet
-                                    ? 'text-gray-300 group-hover:text-blue-400'
-                                    : 'text-gray-200'
-                                }`}>
-                                +
-                            </div>
-                            <p className={`transition-colors text-sm font-medium ${userWallet
-                                    ? 'text-gray-400 group-hover:text-blue-500'
-                                    : 'text-gray-300'
-                                }`}>
-                                Add Stage
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1">
-                                {stages.length}/{MAX_STAGES} stages
-                            </p>
-                            {!userWallet && (
-                                <p className="text-xs text-red-500 mt-2">
-                                    Wallet required
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="w-full max-w-xl bg-gray-50 rounded-xl border-2 border-gray-300 min-h-[280px] flex items-center justify-center shadow-[6px_8px_16px_rgba(0,0,0,0.25)]">
-                        <div className="text-center">
-                            <p className="text-gray-500 font-medium">
-                                Maximum stages reached
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1">
-                                {stages.length}/{MAX_STAGES} stages
-                            </p>
-                        </div>
-                    </div>
-                )}
-            </div>
 
             {/* Modal */}
             <CreateStageModal
@@ -459,6 +667,7 @@ export const StagesColumn = (props: { stages?: ActionChainStage[] }) => {
                 stageIndex={stages.length}
                 isBroadcasting={isBroadcasting}
                 chainTitle={chainTitle}
+                carryFields={carryFields}
             />
         </>
     );
@@ -591,4 +800,45 @@ async function createPushdropToken(
 
     // If neither params were valid or provided return null
     return null;
+}
+
+// Decrypt a stage's on-chain data to recover its custom fields (key + last
+// value), so the canonical-field carry-forward survives reloads / new sessions.
+// Best-effort: returns [] on any failure. Mirrors the decrypt path used by the
+// stage-details view.
+async function recoverCanonicalFields(transactionId: string): Promise<{ key: string; lastValue: string }[]> {
+    try {
+        const receiverResponse = await fetch(`/api/chains/receiver?transactionId=${encodeURIComponent(transactionId)}`);
+        const receiverData = await receiverResponse.json();
+        const receiverKey = receiverData.receiver || "self";
+
+        const overlayData = await getTransactionByTxid(transactionId);
+        if (!overlayData || !overlayData.outputs || !overlayData.outputs[0] || !overlayData.outputs[0].beef) {
+            return [];
+        }
+
+        const transaction = Transaction.fromBEEF(overlayData.outputs[0].beef);
+        const encryptedData = transaction.outputs[0].lockingScript.chunks[0].data as number[];
+
+        const tryDecrypt = (k: string): Record<string, unknown> | null => {
+            try {
+                const keyBytes = Hash.sha256(Utils.toArray(k, 'utf8'));
+                const key = new SymmetricKey(keyBytes);
+                const decrypted = key.decrypt(encryptedData) as number[];
+                return JSON.parse(Utils.toUTF8(decrypted));
+            } catch {
+                return null;
+            }
+        };
+
+        const obj = tryDecrypt(receiverKey) || (receiverKey !== "self" ? tryDecrypt("self") : null);
+        if (!obj) return [];
+
+        const reserved = new Set(['title', 'imageURL', 'receiverPubKey']);
+        return Object.entries(obj)
+            .filter(([k, v]) => !reserved.has(k) && k.trim() && v != null && String(v).trim())
+            .map(([key, v]) => ({ key, lastValue: String(v) }));
+    } catch {
+        return [];
+    }
 }

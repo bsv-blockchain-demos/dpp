@@ -15,6 +15,7 @@ export interface ActionChain {
     _id: ObjectId;
     userId: string;
     title?: string;
+    imageURL?: string;
     stages: ActionChainStage[];
     createdAt?: Date | null;
     updatedAt?: Date | null;
