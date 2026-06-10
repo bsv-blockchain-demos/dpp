@@ -1,41 +1,71 @@
-# Supply Chain Action Builder
+# Dynamic Supply Chain — Dynamic Digital Product Passport
 
-A blockchain-based supply chain management system built on Bitcoin SV (BSV) that enables users to create, transfer, and track multi-stage action chains with on-chain data storage and ownership verification.
+*(formerly "Supply Chain Action Builder")*
 
-## Overview
+A flexible, fully-customisable **Digital Product Passport** engine built on Bitcoin SV (BSV). Instead of hard-coding a single industry's workflow, Dynamic Supply Chain lets you spin up a credible supply-chain demo for *practically any* use case — agriculture, manufacturing, aviation, pharmaceuticals, logistics — by composing free-form **stages**, each carrying arbitrary key/value metadata and recorded as an immutable, encrypted on-chain transaction.
 
-This application allows users to:
-- Create blockchain-based action chains with multiple stages
-- Send and receive chains between users
-- Store stage data on the blockchain with PushDrop protocol
-- Track ownership and transfers via locks and transfer records
-- View stage details and transaction history
+It was built to **supersede bespoke, industry-specific supply-chain implementations**: rather than maintaining one codebase per vertical, the same engine adapts to any product journey. Each completed chain is effectively a **digital product passport** — a verifiable, end-to-end record of a product's life, custody, and provenance, anchored to the blockchain.
+
+The flexibility comes from three things:
+- **Free-form stages** — name each step whatever your use case needs (1–8 stages per chain).
+- **Custom metadata** — attach any key/value fields to a stage (location, supplier, test results, certifications, …).
+- **Optional templates** — start from a pre-built journey (e.g. "Soil to Table") or build from scratch.
+
+## What this demonstrates
+
+The "dynamic" in Dynamic Supply Chain means the passport is assembled at runtime rather than pre-defined:
+
+- **Variable stage count and structure** — no fixed schema; the journey is whatever the participants build.
+- **Arbitrary metadata** per stage, decided as you go.
+- **Multi-party handoff and branching** — a chain can be passed between any number of independent participants, each adding their own stage before forwarding it on.
+- **Immutable, encrypted on-chain record** — every stage is a BSV transaction whose data is encrypted to the next party's key, so the passport is privacy-preserving yet verifiable.
+
+**Example flow:** Alice creates a chain and adds stage 1 (raw materials) → Alice forwards it to Bob → Bob adds stage 2 (manufacturing) and forwards to Carol → Carol adds stage 3 (distribution) and finalizes. The finalized chain is a complete product passport that anyone can browse on the Examples page, with each stage backed by its own on-chain transaction.
 
 ## Core Concepts
 
 ### 1. Action Chains
-Action chains represent supply chain workflows consisting of multiple stages. Each stage is recorded as a blockchain transaction using the PushDrop protocol.
 
-- **Stages**: Individual steps in the supply chain (e.g., "Raw Material Extraction", "Manufacturing", "Distribution")
-- **Metadata**: Custom key-value pairs attached to each stage
-- **Finalization**: Chains must have at least 2 stages and a title to be finalized
+An **action chain** is a product passport made of multiple stages. Each stage is recorded as a BSV transaction using the PushDrop protocol.
+
+- **Stages**: Individual steps in the journey (e.g. "Raw Material Extraction", "Manufacturing", "Distribution"). 1–8 stages per chain.
+- **Metadata**: Custom key/value pairs attached to each stage.
+- **Finalization**: A chain must have at least **2 stages and a title** to be finalized. Once finalized it is immutable and appears in the public Examples gallery.
 
 ### 2. PushDrop Protocol
 
-The application uses the **PushDrop protocol** from BSV SDK to create blockchain transactions with data storage.
+The application uses the **PushDrop protocol** from the BSV SDK to store stage data on-chain. Each stage's metadata (as JSON) is AES-encrypted and embedded in a PushDrop locking script under a 1-satoshi output, using the custom protocol ID `[0, 'supplychain']`.
 
-**Note:** Data is encrypted using AES with a symmetric key, but this is a demo implementation and should not be considered cryptographically secure for production use.
+**Note:** Data is encrypted using a symmetric key derived from the receiver's public key, but this is a demo implementation and should **not** be considered cryptographically secure for production use.
 
-### 3. Receiver Keys & Transfers
+### 3. On-Chain Architecture
+
+This is what makes the passport verifiable end-to-end:
+
+- **Per-stage encryption** — each stage's JSON is encrypted with `SymmetricKey(sha256(receiverPubKey))` and embedded in the PushDrop script. Only the intended receiver's wallet can decrypt it. If no receiver is specified, the data is locked to the creator ("self").
+- **UTXO chaining** — each new stage *spends the previous stage's 1-satoshi PushDrop output* and creates a new one. This forms a literal on-chain chain of custody: the transactions are linked input-to-output, stage after stage.
+- **BSV overlay network** — transactions are broadcast to a BSV overlay service (topic `tm_supplychain`) and discovered/retrieved via its lookup service (`ls_supplychain`) at `https://overlay-us-1.bsvb.tech`. The overlay is how the app fetches the previous stage's transaction (as BEEF) so the next stage can spend it, and how finalized chains are discovered. A `chainId` is attached as an off-chain value at broadcast time.
+
+#### On-chain vs MongoDB
+
+| Stored on-chain (BSV)                          | Stored in MongoDB                                            |
+| ---------------------------------------------- | ----------------------------------------------------------- |
+| Stage transaction ID (proof the stage exists)  | Chain title, created/updated/finalized timestamps & flag    |
+| Encrypted stage metadata (in PushDrop script)  | Stage display fields (title, imageURL, TXID reference)      |
+| The UTXO chain linking stage → stage           | Ownership **locks** and **transfer** records (custody)      |
+
+The blockchain holds the verifiable record; MongoDB provides fast querying, custody tracking, and the demo UI's working state.
+
+### 4. Receiver Keys & Transfers
 
 When creating a stage, you can specify a **receiver public key** to send the chain to another user:
 
-- **No receiver key** → Chain locked to yourself, you retain ownership
-- **Provide receiver key** → Chain sent to that user, ownership transferred
+- **No receiver key** → chain locked to yourself; you retain ownership.
+- **Provide receiver key** → chain encrypted and sent to that user; ownership transfers to them.
 
-### 4. Ownership & Permissions
+### 5. Ownership & Permissions
 
-The system uses two main mechanisms to track ownership:
+Two mechanisms track custody:
 
 #### A. Locks Collection
 ```typescript
@@ -46,9 +76,9 @@ interface ActionLock {
     createdAt: Date;
 }
 ```
-- Created when a user keeps a chain for themselves
-- Proves active ownership
-- Deleted when chain is sent to another user
+- Created when a user keeps a chain for themselves (proves active ownership).
+- One lock per user per chain (enforced by unique indexes).
+- Deleted when the chain is sent to another user.
 
 #### B. ChainTransfer Collection
 ```typescript
@@ -62,127 +92,170 @@ interface ChainTransfer {
     continuedAt?: Date;
 }
 ```
-- Tracks chain transfers between users
-- `continued: false` → Chain appears in receiver's inbox
-- `continued: true` → Chain no longer appears in receiver's inbox
+- Tracks chain transfers between users.
+- `continued: false` → chain appears in the receiver's inbox.
+- `continued: true` → receiver has added a stage; chain leaves the inbox.
 
-The system handles various ownership scenarios including chains sent immediately on first stage, chains bouncing between multiple users, and chains passed forward without being kept.
+A user may send a chain if they are the original creator (on the first stage), currently hold a lock, or are the most recent receiver who has continued it. This handles chains sent immediately on the first stage, chains bouncing between multiple users, and chains passed forward without being kept.
 
 ## User Workflows
 
 ### Creating a Chain
-1. Navigate to "Create" page
-2. Enter an Action Chain Title
-3. Optionally select a template (e.g., "Soil to Table", "Plastic Product Lifecycle")
-4. Add stages with metadata
+1. Navigate to the **Create** page.
+2. Enter an Action Chain Title.
+3. Optionally select a template (e.g. "Soil to Table", "Plastic Product Lifecycle").
+4. Add stages with custom metadata.
 5. For each stage:
-   - **Leave receiver empty** → Lock to self, continue building
-   - **Provide receiver key** → Send to another user, lose ownership
-6. Once ≥2 stages, click "Finalize Action Chain"
+   - **Leave receiver empty** → lock to self, continue building.
+   - **Provide receiver key** → send to another user, transfer ownership.
+6. Once there are ≥2 stages, click **Finalize Action Chain**.
 
 ### Receiving a Chain
-1. Navigate to "Received" page (shows badge with pending count)
-2. View chains sent to you (where `continued: false`)
-3. Click "Continue Chain" to add a stage
+1. Navigate to the **Received** page (the navbar shows a badge with the pending count).
+2. View chains sent to you (where `continued: false`).
+3. Click **Continue Chain** to add a stage.
 4. Choose to:
-   - **Keep for self** (no receiver) → Create lock, continue building
-   - **Send to someone else** → Transfer ownership
+   - **Keep for self** (no receiver) → create a lock, continue building.
+   - **Send to someone else** → transfer ownership onward.
+
+### Browsing Examples
+1. Navigate to the **Examples** page — a paginated, searchable gallery of all finalized product passports (search by title, ID, creator, or stage).
+2. Click any chain to open `/examples/[id]` and view its full stage history.
 
 ### Viewing Stage Details
-- Click on any stage card to open details panel
-- View stage metadata and blockchain transaction details
-- Click "Expand Full Details" for full-screen modal view
-- Shows receiver information and sender public key
+- Click any stage card to open the details panel.
+- View decrypted stage metadata and the blockchain transaction details.
+- Click **Expand Full Details** for the full-screen modal view (shows receiver/sender public keys and lock status).
 
 ## Key Features
 
 ### Automatic Pending Count
-The navbar shows a real-time badge on "Received" with the count of pending chains:
-```typescript
-// Fetches count every 30 seconds
-const count = await fetch('/api/chains/pending-count?receiverPubKey=<pubkey>');
-// Shows red badge with number (or "9+" for 10+)
-```
+The navbar shows a real-time badge on **Received** with the count of pending chains, refreshed every 30 seconds (shows "9+" for 10 or more).
 
 ### Title Validation
-When sending to another user, a chain title is **required**:
-- Modal button disabled if receiver specified without title
-- Red warning message appears
-- Ensures all transferred chains have meaningful identifiers
+When sending to another user, a chain title is **required** — the send button is disabled and a warning appears until one is provided, ensuring every transferred passport has a meaningful identifier.
 
 ### Template System
-Pre-defined templates with stage structures:
-- **Soil to Table**: Agricultural supply chain (7 stages)
-- **Plastic Product Lifecycle**: Manufacturing to recycling (7 stages)
-- **Aircraft Parts Lifecycle**: Aviation supply chain (7 stages)
+Pre-defined templates with ready-made stage structures (7 stages each):
+- **Soil to Table** — agricultural supply chain.
+- **Plastic Product Lifecycle** — manufacturing to recycling.
+- **Aircraft Parts Lifecycle** — aviation supply chain.
+
+Templates are just starting points; you can rename stages, add/remove them (1–8), and define any metadata fields.
 
 ## Technical Stack
 
-- **Framework**: Next.js 14 (App Router)
+- **Framework**: Next.js 16 (App Router) + React 19
+- **Language**: TypeScript
 - **Blockchain**: Bitcoin SV (BSV)
-- **SDK**: @bsv/sdk (PushDrop, Transaction, Wallet APIs)
-- **Database**: MongoDB (ActionChains, Locks, ChainTransfers)
-- **Styling**: Tailwind CSS
-- **State Management**: React Context (Wallet)
+- **BSV libraries**: `@bsv/sdk` (PushDrop, Transaction, WalletClient) and `@bsv/wallet-toolbox`
+- **Overlay services**: BSV overlay network (`tm_supplychain` topic / `ls_supplychain` lookup)
+- **Database**: MongoDB (`actionChains`, `locks`, `chainTransfers`)
+- **Styling**: Tailwind CSS v4
+- **State management**: React Context (wallet)
+- **Notifications**: react-hot-toast
 
 ## Getting Started
 
 ### Prerequisites
+- **A BRC-100 wallet running at `localhost:4000`.** The app connects via `WalletClient('auto', 'localhost:4000')`; your wallet's identity public key becomes your user ID. Nothing on-chain works without it.
+- **A MongoDB instance** reachable via `MONGODB_URI`.
+- Node.js 20+.
+- (The BSV overlay endpoint is a public default — `https://overlay-us-1.bsvb.tech` — and requires no configuration.)
+
+### Install
 ```bash
 npm install
 ```
 
 ### Environment Variables
-Create a `.env.local` file:
+Create a `.env.local` file with your MongoDB connection string (the database name is parsed from the URI path):
 ```env
-MONGODB_URI=your_mongodb_connection_string
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/supplychain
 ```
 
 ### Run Development Server
 ```bash
 npm run dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000).
 
 ### Connect Wallet
-Click "Connect Wallet" in the navbar to initialize your BSV wallet.
+Click **Connect Wallet** in the navbar to initialize your BSV wallet (requires the wallet server above).
 
 ## API Routes
 
-- `POST /api/stages` - Create a new stage
-- `POST /api/stages/finalize` - Finalize an action chain
-- `GET /api/stages/current` - Get user's current active chain
-- `POST /api/chains/send` - Send chain to another user
-- `GET /api/chains/received` - Get received chains (not continued)
-- `GET /api/chains/pending-count` - Count of pending received chains
-- `POST /api/chains/continue` - Continue a received chain
-- `POST /api/lock` - Create ownership lock
+### Stages
+- `POST /api/stages/new-stage` — create the first stage (new chain) or append a stage to an existing chain
+- `POST /api/stages/finalize` — finalize a chain (requires ≥2 stages and a title)
+- `GET /api/stages/current` — get the user's current active (locked, non-finalized) chain
+
+### Chains / Transfers
+- `POST /api/chains/send` — send a chain to another user (creates a transfer, removes sender's lock)
+- `GET /api/chains/received` — get chains sent to a user (where `continued: false`)
+- `GET /api/chains/pending-count` — count of pending received chains (used by the navbar badge)
+- `POST /api/chains/continue` — add a stage to a received chain and mark the transfer continued
+- `GET /api/chains/receiver` — receiver lookup helper
+
+### Locks
+- `POST /api/lock` — create an ownership lock
+- `GET /api/lock` — check the user's active lock
+- `POST /api/lock/check` — check lock state (prevents double-locking)
+
+### Discovery & Health
+- `GET /api/examples` — fetch finalized chains with search, filtering, and pagination
+- `GET /health` — liveness check
+- `GET /ready` — readiness check (verifies dependencies such as MongoDB)
 
 ## Database Collections
 
 ### actionChains
-- Stores complete action chains with all stages
-- Each stage includes: TransactionID, Timestamp, title, imageURL, metadata
+- Stores complete action chains with all stages.
+- Each stage includes: `TransactionID`, `Timestamp`, `title`, `imageURL`, and custom metadata. 1–8 stages per chain.
 
 ### locks
-- Proves active ownership of a chain
-- One lock per user per chain
-- Deleted when chain is sent to another user
+- Proves active ownership of a chain (one lock per user per chain).
+- Deleted when a chain is sent to another user.
 
 ### chainTransfers
-- Tracks all transfers between users
-- `continued: false` → Appears in receiver's inbox
-- `continued: true` → Receiver has taken action
+- Tracks all transfers between users.
+- `continued: false` → appears in the receiver's inbox.
+- `continued: true` → receiver has taken action.
+
+## Testing
+
+The project uses **Jest** (with `ts-jest`). Tests live in `_tests/`:
+- `pushdrop.test.ts` — PushDrop locking-script creation, transaction creation and spending (same wallet **and** cross-wallet, i.e. a receiver unlocking a sender's token), complex supply-chain payloads, and error handling.
+- `encryption.test.ts` — symmetric encryption/decryption round-trips and failure with the wrong key.
+- `test-utils.ts` — wallet/mocking helpers (`makeWallet`, `MockChain`).
+
+```bash
+npm test              # run all tests once
+npm run test:watch    # watch mode
+npm run test:coverage # coverage report
+```
+
+## Deployment
+
+A multi-stage **Dockerfile** (Node 20 Alpine, Next.js standalone output, runs as a non-root user on port 3000) is included:
+
+```bash
+docker build -t dynamic-supplychains .
+docker run -p 3000:3000 -e MONGODB_URI="<your-uri>" dynamic-supplychains
+```
+
+CI is configured in `.github/workflows/build.yml`: pushing a `v*` tag (e.g. `v1.2.3`) builds a **multi-arch** image (linux/amd64 + linux/arm64) and publishes it to the GitHub Container Registry (GHCR).
 
 ## Security & Privacy
 
-- **Blockchain Verification**: All stages recorded as BSV transactions
-- **Permission System**: Multi-factor verification prevents unauthorized transfers
-- **Ownership Tracking**: Locks and transfer records ensure proper chain custody
+- **Blockchain verification**: every stage is recorded as a BSV transaction, linked to the previous stage via UTXO chaining.
+- **Per-stage encryption**: stage data is encrypted to the next party's public key.
+- **Permission system**: multi-factor ownership checks (creator / lock / latest continued receiver) prevent unauthorized transfers.
+- **Custody tracking**: locks and transfer records maintain a clear chain of custody.
 
-## DISCLAIMER:
-This is a public open source demo, encryption is not secure. Do not directly use this for real or sensitive supply chain data.
+## DISCLAIMER
+
+This is a public, open-source demo. The encryption is **not** production-secure. Do not use it directly for real or sensitive supply-chain data.
 
 ## License
 
