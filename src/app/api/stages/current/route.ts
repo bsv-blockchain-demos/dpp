@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
                 _id: actionChain._id.toString(),
                 userId: actionChain.userId,
                 title: actionChain.title,
+                imageURL: actionChain.imageURL,
                 stages: actionChain.stages,
                 createdAt: actionChain.createdAt,
                 updatedAt: actionChain.updatedAt,

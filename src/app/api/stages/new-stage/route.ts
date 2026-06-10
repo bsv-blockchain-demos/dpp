@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
         const { actionChainCollection } = await connectToMongo();
         const body = await request.json();
 
-        const { userId, stage, isFirst, actionChainId, chainTitle } = body;
+        const { userId, stage, isFirst, actionChainId, chainTitle, chainImageURL } = body;
 
         // Validate required fields
         if (!userId || !stage || typeof isFirst !== 'boolean') {
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
             const newActionChain = {
                 userId,
                 title: chainTitle || null,
+                imageURL: chainImageURL || null,
                 stages: [normalizedStage],
                 createdAt: new Date(),
                 updatedAt: new Date(),

@@ -7,6 +7,7 @@ export const actionChainValidator = {
       _id: {}, // created by Mongo
       userId: { bsonType: "string" },
       title: { bsonType: ["string", "null"] },
+      imageURL: { bsonType: ["string", "null"] },
       createdAt: { bsonType: ["date", "null"] },
       updatedAt: { bsonType: ["date", "null"] },
       finalized: { bsonType: ["bool", "null"] },
