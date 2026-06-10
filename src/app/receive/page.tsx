@@ -21,30 +21,15 @@ export default function ReceivePage() {
     const [selectedChain, setSelectedChain] = useState<ReceivedChain | null>(null);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-900 p-8">
-            <div className="max-w-6xl mx-auto">
-                {!selectedChain ? (
-                    <>
-                        {/* Header */}
-                        <div className="text-center mb-12">
-                            <h1 className="text-4xl font-bold text-white mb-4">
-                                Received Chains
-                            </h1>
-                            <p className="text-blue-100">
-                                View and continue chains that were sent to you
-                            </p>
-                        </div>
-
-                        {/* Received Chains List */}
-                        <ReceivedChainsList onSelectChain={setSelectedChain} />
-                    </>
-                ) : (
-                    <ContinueChainColumn 
-                        chain={selectedChain} 
-                        onBack={() => setSelectedChain(null)} 
-                    />
-                )}
-            </div>
-        </div>
+        <main className="mx-auto max-w-[920px] px-6 py-9 sm:px-10 sm:py-12">
+            {!selectedChain ? (
+                <ReceivedChainsList onSelectChain={setSelectedChain} />
+            ) : (
+                <ContinueChainColumn
+                    chain={selectedChain}
+                    onBack={() => setSelectedChain(null)}
+                />
+            )}
+        </main>
     );
 }

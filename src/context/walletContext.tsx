@@ -11,6 +11,7 @@ type WalletContextType = {
     userPubKey: string | null;
     isConnecting: boolean;
     initializeWallet: () => Promise<void>;
+    disconnect: () => void;
 }
 
 const WalletContext = createContext<WalletContextType>({
@@ -18,6 +19,7 @@ const WalletContext = createContext<WalletContextType>({
     userPubKey: null,
     isConnecting: false,
     initializeWallet: async () => { },
+    disconnect: () => { },
 });
 
 export const WalletContextProvider = ({ children }: { children: React.ReactNode }) => {
@@ -58,12 +60,19 @@ export const WalletContextProvider = ({ children }: { children: React.ReactNode 
         }
     }, []);
 
+    const disconnect = useCallback(() => {
+        setUserWallet(null);
+        setUserPubKey(null);
+    }, []);
+
     useEffect(() => {
+        // auto-connect once on mount; initializeWallet is stable
         initializeWallet();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return (
-        <WalletContext.Provider value={{ userWallet, userPubKey, isConnecting, initializeWallet }}>
+        <WalletContext.Provider value={{ userWallet, userPubKey, isConnecting, initializeWallet, disconnect }}>
             {children}
         </WalletContext.Provider>
     );
