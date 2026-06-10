@@ -52,14 +52,11 @@ This is a facelift *within* the existing framework — not a rewrite, not a re-p
 
 ---
 
-## 4. The one permitted navigation change (landing page routing)
+## 4. Landing-page routing — DECIDED
 
-A landing page wants to live at `/`, but `/` is currently the chain builder.
+**Decision (locked 2026-06-10):** `/` becomes the **landing page**; the chain builder moves to **`/create`**; update the navbar "Create" link and any internal links/redirects that point at the builder (navigation wiring only — not logic). This is the *only* permitted routing change. The builder's behaviour stays byte-for-byte identical.
 
-- **Recommended (default):** make **`/` the landing page**, move the builder to **`/create`**, and update the navbar "Create" link plus any internal links/redirects that point at the builder (navigation wiring only — not logic). This is the *only* routing change permitted.
-- **Lower-risk alternative (if the user prefers zero routing churn):** keep the builder at `/`, put the landing at `/welcome` (or `/about`) and link it prominently from the navbar/logo.
-
-Confirm which the user wants before relocating routes. Either way, the builder's behaviour stays byte-for-byte identical.
+*(Rejected alternative: keep the builder at `/` with the landing at `/welcome`.)*
 
 ---
 
