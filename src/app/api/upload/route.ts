@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { uploadToS3 } from "../../../lib/s3";
 
 export const runtime = "nodejs";
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
         const safeName = (blob.name || "file")
             .replace(/[^a-zA-Z0-9._-]/g, "_")
             .slice(-60);
-        const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+        const key = `uploads/${randomUUID()}-${safeName}`;
 
         const { url } = await uploadToS3(buffer, contentType, key);
         return NextResponse.json({ url });

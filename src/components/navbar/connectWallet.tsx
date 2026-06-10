@@ -89,9 +89,13 @@ export const ConnectWallet = () => {
                             <button
                                 type="button"
                                 className="copybtn"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(userPubKey);
-                                    toast.success("Identity key copied", { duration: 2000 });
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(userPubKey);
+                                        toast.success("Identity key copied", { duration: 2000 });
+                                    } catch {
+                                        toast.error("Couldn't copy. Select the key and copy it manually.", { duration: 3000 });
+                                    }
                                 }}
                                 title="Copy identity key"
                                 aria-label="Copy identity key"

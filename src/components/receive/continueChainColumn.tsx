@@ -41,6 +41,7 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
     const [hasAddedStage, setHasAddedStage] = useState(false);
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<ChainTemplate | null>(null);
+    const [lastStageForwarded, setLastStageForwarded] = useState(false);
 
     const { userWallet, userPubKey } = useWalletContext();
 
@@ -198,6 +199,9 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
 
             setStages([...stages, newStage]);
             setHasAddedStage(true);
+            // The stage you just added is forwarded (locked to a receiver) only
+            // when you specified one; otherwise you still hold it yourself.
+            setLastStageForwarded(Boolean(newReceiverPubKey));
         } catch (error) {
             console.error('Error adding stage:', error);
             toast.error('An error occurred while adding the stage');
@@ -394,7 +398,7 @@ export const ContinueChainColumn = ({ chain, onBack }: ContinueChainColumnProps)
                             stage={stage}
                             index={index}
                             isFirst={index === 0}
-                            lock={index === stages.length - 1 ? "self" : "sent"}
+                            lock={index === stages.length - 1 ? (lastStageForwarded ? "sent" : "self") : "sent"}
                         />
                     ))}
 

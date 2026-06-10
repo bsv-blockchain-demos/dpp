@@ -176,9 +176,13 @@ export function StageDetailsContent({
             <button
               type="button"
               className="copybtn"
-              onClick={() => {
-                navigator.clipboard.writeText(transactionId);
-                toast.success("Transaction ID copied", { duration: 2000 });
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(transactionId);
+                  toast.success("Transaction ID copied", { duration: 2000 });
+                } catch {
+                  toast.error("Couldn't copy. Copy the txid manually.", { duration: 3000 });
+                }
               }}
               title="Copy transaction ID"
               aria-label="Copy transaction ID"

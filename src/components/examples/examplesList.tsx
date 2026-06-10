@@ -201,7 +201,7 @@ export const ExamplesList = () => {
             />
 
             {/* Search */}
-            {!isLoading && actionChains.length > 0 && (
+            {!isLoading && (actionChains.length > 0 || serverSearchQuery) && (
                 <div style={{ position: "relative", marginBottom: 22 }}>
                     <Icon name="search" size={17} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }} />
                     <input
@@ -254,8 +254,8 @@ export const ExamplesList = () => {
                 </>
             )}
 
-            {/* Empty */}
-            {!isLoading && actionChains.length === 0 && (
+            {/* Empty (no passports exist, and not a no-match search) */}
+            {!isLoading && actionChains.length === 0 && !serverSearchQuery && (
                 <div className="card" style={{ padding: "52px 40px", marginTop: 8 }}>
                     <div className="empty">
                         <div className="empty-ico"><Icon name="scroll-text" size={26} /></div>
@@ -266,8 +266,8 @@ export const ExamplesList = () => {
                 </div>
             )}
 
-            {/* No results */}
-            {!isLoading && actionChains.length > 0 && filteredChains.length === 0 && (
+            {/* No results (client filter or server search returned nothing) */}
+            {!isLoading && filteredChains.length === 0 && (actionChains.length > 0 || serverSearchQuery) && (
                 <div className="card" style={{ padding: "52px 40px" }}>
                     <div className="empty">
                         <div className="empty-ico"><Icon name="search" size={26} /></div>
